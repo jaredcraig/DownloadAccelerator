@@ -1,0 +1,89 @@
+#!/usr/bin/env python
+import optparse
+import sys
+import requests
+import threading
+
+class DownloaderAccelerator:
+    def __init__(self, threads, url):
+        self.port = 8000
+        self.range = 0
+        self.length = 0
+        self.threads = threads
+        self.url = url
+        self.rmin = 0
+        self.rmax = 1024
+        self.lock = threading.Lock()
+        self.parse_options()
+        self.run()
+
+    def parse_options(self):
+        parser = optparse.OptionParser(usage = "%prog [options]",
+                                       version = "%prog 0.1")
+
+        parser.add_option("-t","--threads",type="int",dest="threads",
+                          default=1,
+                          help="number of threads")
+
+        parser.add_option("-u","--url",type="string",dest="url",
+                          default="http://localhost:8000/tl_2013_10_tract.zip",
+                          help="the url")
+
+        (options,args) = parser.parse_args()
+        self.threads = options.threads
+        self.url = options.url
+
+    def run(self):
+        print("using (%d) threads to download '%s'" % (self.threads, self.url) )
+        try:
+            response = requests.head(self.url)
+            self.length = int(response.headers.get('Content-Length'))
+            print response
+            if (self.length <= 0):
+                raise IOError
+            self.start()
+        except IOError as e:
+            print "Invalid Content-Length"
+            exit(0)
+
+    def start(self):
+        local_filename = self.url.split('/')[-1]
+        print '%s(%d) bytes' % (local_filename, self.length)
+        f = open(local_filename, 'wb')
+        self.startThreads(f)
+        f.close()
+        return local_filename
+
+    def startThreads(self, f):
+        threads = []
+        for i in range(self.threads):
+            t = threading.Thread(target = self.download, args=(i+1, f,))
+            threads.append(t)
+            t.start()
+        for thread in threads:
+            thread.join(60)
+            if thread.isAlive():
+                print "Waited too long ... aborting"
+                return
+
+    def download(self, i, f):
+        while (True):
+            self.lock.acquire()
+            if (self.rmax == self.length):
+                self.lock.release()
+                break
+            if (self.rmax + 1024 < self.length):
+                self.rmin += 1024
+                self.rmax += 1024
+            else:
+                self.rmin += 1024
+                self.rmax = self.length
+            bytes = 'bytes=%d-%d' % (self.rmin, self.rmax)
+            r = requests.get(self.url, headers={'Accept-Encoding': 'identity', 'Range': bytes}, stream=True)
+            print 'receiving %d bytes' % int(r.headers.get('Content-Length'))
+            #if r.content:
+                #f.write(r.content)
+            self.lock.release()
+
+if __name__ == '__main__':
+    d = DownloaderAccelerator(1, "http://www2.census.gov/geo/tiger/TIGER2013/TRACT/tl_2013_10_tract.zip")
