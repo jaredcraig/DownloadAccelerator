@@ -1,7 +1,6 @@
-#!/usr/bin/env python
 import optparse
 import sys
-import requests
+import httplib
 import threading
 
 class DownloaderAccelerator:
@@ -14,6 +13,8 @@ class DownloaderAccelerator:
         self.rmin = 0
         self.time = 0.0
         self.rmax = 1024
+        self.host = ''
+        self.path = ''
         self.finished = False
         self.lock = threading.Lock()
         self.parse_options()
@@ -24,11 +25,11 @@ class DownloaderAccelerator:
                                        version = "%prog 0.1")
 
         parser.add_option("-t","--threads",type="int",dest="threads",
-                          default=1,
+                          default=5,
                           help="number of threads")
 
         parser.add_option("-u","--url",type="string",dest="url",
-                          default="http://localhost:8000/tl_2013_10_tract.zip",
+                          default="cs360.byu.edu/static/lectures/fall-2015/semaphores.pdf",
                           help="the url")
 
         (options,args) = parser.parse_args()
@@ -38,13 +39,19 @@ class DownloaderAccelerator:
     def run(self):
         print("using (%d) threads to download '%s'" % (self.threads, self.url) )
         try:
-            response = requests.head(self.url)
-            self.length = int(response.headers.get('Content-Length'))
+            host = self.url.split('/')[0]
+            path = self.url[len(host):]
+            conn = httplib.HTTPConnection(host)
+            conn.request("HEAD", path);
+            resp = conn.getresponse()
+            self.length = int(resp.getheader('content-length'))
+            
             if (self.length <= 0):
                 raise IOError
             self.start()
-        except IOError as e:
-            print "Invalid Content-Length"
+
+        except:
+            print "HTTP ERROR!"
             exit(0)
 
     def start(self):
@@ -69,20 +76,27 @@ class DownloaderAccelerator:
                 return
 
     def download(self, i, f):
+        host = self.url.split('/')[0]
+        path = self.url[len(host):]
         while (True):
             self.lock.acquire()
-
-            if (self.rmax == self.length):
+            if (self.rmax >= self.length):
                 if (self.finished):
                     self.lock.release()
                     break
                 self.finished = True
 
             bytes = 'bytes=%d-%d' % (self.rmin, self.rmax)
-            r = requests.get(self.url, headers={'Accept-Encoding': 'identity', 'Range': bytes}, stream=True)
-            #print 'downloading range %d-%d out of %d total bytes' %(self.rmin,self.rmax,self.length)
-            #print 'Response code: %d' % (r.status_code)
-            #print 'thread %d\treceived %s bytes' % (i,r.headers.get('Content-Length'))
+            conn = httplib.HTTPConnection(host)
+            conn.request("GET", '/', headers={'Range': 'bytes=0-299'})
+            resp = conn.getresponse()
+            print resp.status
+            print 'downloading range %d-%d out of %d total bytes' %(self.rmin,self.rmax,self.length)
+            print 'thread %d\treceived %s bytes' % (i,ls
+            r.headers.get('Content-Length'))
+            self.lock.release()
+            break
+
             if (r.status_code == 200):
                 self.rmax = self.length
                 finished = True

@@ -1,5 +1,10 @@
 #Lab: Download Accelerator
 
+virtualenv env
+source env/bin/activate
+pip install requests
+
+
 In this assignment, you will create an HTTP downloader that can download a file in parallel using a number of concurrent number of threads. You will use Python for this assignment.
 
 The goals of this assignment are (1) to gain additional familiarity with using Python for writing networking code, and (2) to learn how to use threading in Python.
