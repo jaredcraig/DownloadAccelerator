@@ -16,7 +16,7 @@ class DownloaderAccelerator:
         self.host = ''
         self.path = ''
         self.finished = False
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.parse_options()
         self.run()
 
@@ -29,7 +29,7 @@ class DownloaderAccelerator:
                           help="number of threads")
 
         parser.add_option("-u","--url",type="string",dest="url",
-                          default="cs360.byu.edu/static/lectures/fall-2015/semaphores.pdf",
+                          default="localhost:8000/tl_2013_10_tract.zip",
                           help="the url")
 
         (options,args) = parser.parse_args()
@@ -56,10 +56,8 @@ class DownloaderAccelerator:
 
     def start(self):
         local_filename = self.url.split('/')[-1]
-        print '%s(%d) bytes' % (local_filename, self.length)
         f = open(local_filename, 'wb')
         self.startThreads(f)
-        print 'url:%s threads:%d size:%d time:%f' % (self.url,self.threads,self.length,self.time)
         f.close()
         return local_filename
 
@@ -78,38 +76,40 @@ class DownloaderAccelerator:
     def download(self, i, f):
         host = self.url.split('/')[0]
         path = self.url[len(host):]
+        conn = httplib.HTTPConnection(host)
         while (True):
             self.lock.acquire()
-            if (self.rmax >= self.length):
-                if (self.finished):
-                    self.lock.release()
-                    break
+            if self.finished:
+                self.lock.release()
+                break;
+            elif self.rmax >= self.length:
+                finished = True
+            print '  <thread%2d> downloading [%d-%d] of [%d]' %(i,self.rmin,self.rmax,self.length)
+            bytes = 'bytes=%d-%d' % (self.rmin, self.rmax)
+            #conn.request("GET", path, headers={'Range': bytes})
+            #resp = conn.getresponse()
+            #status = resp.status
+            #content = resp.read()
+            #print '    %d: %d bytes received' % (resp.status,len(content))
+            status = 206
+            content = ''
+
+            if (status == 200):
+                self.rmax = self.length
+                self.finished = True
+            elif status == 206:
+                if (self.rmax + 1024 <= self.length):
+                    self.rmin = self.rmax + 1
+                    self.rmax += 1024
+                else:
+                    self.rmin = self.rmax + 1
+                    self.rmax = self.length
+            else:
+                print 'Error downloading file! Server returned response: %s' % resp.status
                 self.finished = True
 
-            bytes = 'bytes=%d-%d' % (self.rmin, self.rmax)
-            conn = httplib.HTTPConnection(host)
-            conn.request("GET", '/', headers={'Range': 'bytes=0-299'})
-            resp = conn.getresponse()
-            print resp.status
-            print 'downloading range %d-%d out of %d total bytes' %(self.rmin,self.rmax,self.length)
-            print 'thread %d\treceived %s bytes' % (i,ls
-            r.headers.get('Content-Length'))
-            self.lock.release()
-            break
-
-            if (r.status_code == 200):
-                self.rmax = self.length
-                finished = True
-            if r.content:
-                f.write(r.content)
-
-            if (self.rmax + 1024 <= self.length):
-                self.rmin = self.rmax + 1
-                self.rmax += 1024
-            else:
-                self.rmin = self.rmax + 1
-                self.rmax = self.length
-
+            if content:
+                f.write(content)
             self.lock.release()
 
 if __name__ == '__main__':
