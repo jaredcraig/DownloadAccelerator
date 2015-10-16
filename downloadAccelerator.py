@@ -3,20 +3,33 @@ import sys
 import httplib
 import threading
 
+class myThread(threading.Thread):
+    def __init__(self, index, url, byte_range):
+        self.content = ''
+        super(myThread, self).__init__()
+        self.url = url
+        self.byte_range = byte_range
+        self.index = index
+        
+    def run(self):
+        host = self.url.split('/')[0]
+        path = self.url[len(host):]
+        conn = httplib.HTTPConnection(host)
+        
+        bytes = 'bytes=%d-%d' % (self.byte_range[0],self.byte_range[1])
+        conn.request("GET", path, headers={'Range': bytes})
+        resp = conn.getresponse()
+        status = resp.status
+        self.content = resp.read()
+        print '<thread%2d> received %s' % (self.index,resp.getheader('content-range'))
+
 class DownloaderAccelerator:
     def __init__(self, threads, url):
         self.port = 8000
-        self.range = 0
         self.length = 0
         self.threads = threads
         self.url = url
-        self.rmin = 0
         self.time = 0.0
-        self.rmax = 1024
-        self.host = ''
-        self.path = ''
-        self.finished = False
-        self.lock = threading.RLock()
         self.parse_options()
         self.run()
 
@@ -24,12 +37,12 @@ class DownloaderAccelerator:
         parser = optparse.OptionParser(usage = "%prog [options]",
                                        version = "%prog 0.1")
 
-        parser.add_option("-t","--threads",type="int",dest="threads",
+        parser.add_option("-n","--threads",type="int",dest="threads",
                           default=5,
                           help="number of threads")
 
         parser.add_option("-u","--url",type="string",dest="url",
-                          default="localhost:8000/tl_2013_10_tract.zip",
+                          default="cs360.byu.edu/static/lectures/fall-2015/semaphores.pdf",
                           help="the url")
 
         (options,args) = parser.parse_args()
@@ -39,78 +52,76 @@ class DownloaderAccelerator:
     def run(self):
         print("using (%d) threads to download '%s'" % (self.threads, self.url) )
         try:
-            host = self.url.split('/')[0]
+            if (self.url.startswith('http')):
+                self.url = self.url[7:]
+            urlList = self.url.split('/')
+            host = urlList[0]
             path = self.url[len(host):]
+            if (len(path) == 0):
+                path = '/index.html'
             conn = httplib.HTTPConnection(host)
-            conn.request("HEAD", path);
+            bytes = 'bytes=%d-%d' % (0, 299)
+            conn.request("GET", path, headers={'Range': bytes, 'Accept-Encoding': 'identity'})
             resp = conn.getresponse()
-            self.length = int(resp.getheader('content-length'))
-            
+            print resp.status, resp.reason
+            self.length = resp.getheader('content-length')
+            print resp.getheaders()
             if (self.length <= 0):
                 raise IOError
-            self.start()
-
+            if resp.status == 206:
+                self.start()
+            elif resp.status == 200:
+                self.download()
+            else:
+                print 'An error occurred: ',resp.status, resp.reason
         except:
-            print "HTTP ERROR!"
+            print 'error handling request'
             exit(0)
 
-    def start(self):
-        local_filename = self.url.split('/')[-1]
-        f = open(local_filename, 'wb')
-        self.startThreads(f)
-        f.close()
-        return local_filename
-
-    def startThreads(self, f):
-        threads = []
-        for i in range(self.threads):
-            t = threading.Thread(target = self.download, args=(i+1, f,))
-            threads.append(t)
-            t.start()
-        for thread in threads:
-            thread.join(60)
-            if thread.isAlive():
-                print "Waited too long ... aborting"
-                return
-
-    def download(self, i, f):
-        host = self.url.split('/')[0]
+    def download(self):
+        local_filename = ''
+        url_list = self.url.split('/')
+        host = url_list[0]
         path = self.url[len(host):]
         conn = httplib.HTTPConnection(host)
-        while (True):
-            self.lock.acquire()
-            if self.finished:
-                self.lock.release()
-                break;
-            elif self.rmax >= self.length:
-                finished = True
-            print '  <thread%2d> downloading [%d-%d] of [%d]' %(i,self.rmin,self.rmax,self.length)
-            bytes = 'bytes=%d-%d' % (self.rmin, self.rmax)
-            #conn.request("GET", path, headers={'Range': bytes})
-            #resp = conn.getresponse()
-            #status = resp.status
-            #content = resp.read()
-            #print '    %d: %d bytes received' % (resp.status,len(content))
-            status = 206
-            content = ''
 
-            if (status == 200):
-                self.rmax = self.length
-                self.finished = True
-            elif status == 206:
-                if (self.rmax + 1024 <= self.length):
-                    self.rmin = self.rmax + 1
-                    self.rmax += 1024
-                else:
-                    self.rmin = self.rmax + 1
-                    self.rmax = self.length
-            else:
-                print 'Error downloading file! Server returned response: %s' % resp.status
-                self.finished = True
+        if (len(url_list) == 1 or not url_list[-1]):
+            local_filename = 'index.html'
+            path == '/index.html'
+        else:
+            local_filename = url_list[-1]
+        f = open(local_filename, 'wb')
+        bytes = 'bytes=%d-%d' % (0, 299)
+        conn.request("GET", path, headers={'Range': bytes, 'Accept-Encoding': 'identity'})
+        resp = conn.getresponse()
+        print resp.status, resp.reason
+        print resp.getheaders()
+        f.write(resp.read())
+        f.close()
+        
+    def start(self):
+        local_filename = self.url.split('/')[-1]
+        threads = []
+        chunk_size = self.length / self.threads
+        start = 0
+        stop = chunk_size
+        print local_filename
+        for i in range(self.threads):
+            if (i == self.threads - 1):
+                stop = self.length
+            byte_range = [start,stop]
+            t = myThread(i+1, self.url,byte_range,)
+            start = stop + 1
+            stop += chunk_size
+            threads.append(t)
+            t.start()
 
-            if content:
-                f.write(content)
-            self.lock.release()
+        f = open(local_filename, 'wb')
+        for thread in threads:
+            thread.join()
+            f.write(thread.content)
+        f.close()
+        return local_filename
 
 if __name__ == '__main__':
     d = DownloaderAccelerator(1, "http://www2.census.gov/geo/tiger/TIGER2013/TRACT/tl_2013_10_tract.zip")
