@@ -3,7 +3,6 @@ import optparse
 import threading
 import os
 
-
 class myThread(threading.Thread):
     def __init__(self, index, url, byte_range):
         self.content = ''
@@ -14,10 +13,9 @@ class myThread(threading.Thread):
         self.content = ''
 
     def run(self):
-        host = self.url.split('/')[0]
         bytes = '%d-%d' % (self.byte_range[0], self.byte_range[1])
         r = requests.get(self.url, headers={'Range': 'bytes=%s' % bytes, 'Accept-Encoding': 'identity'})
-        #print '<thread%2d> received %s' % (self.index,r.headers.get('Content-Range'))
+        print '<thread%2d> received [%s]' % (self.index,r.headers.get('Content-Range'))
         for chunk in r.iter_content(chunk_size=1024):
             if chunk:
                 self.content += chunk
@@ -33,7 +31,7 @@ class DownloaderAccelerator:
         self.run()
 
     def parse_options(self):
-        parser = optparse.OptionParser(usage = "%prog [options]",
+        parser = optparse.OptionParser(usage = "%prog -n <number of threads> -u <url>",
                                        version = "%prog 0.1")
 
         parser.add_option("-n","--threads",type="int",dest="threads",
@@ -50,16 +48,18 @@ class DownloaderAccelerator:
 
     def run(self):
         try:
+            if (not self.url.startswith('http')):
+                self.url = 'http://' + self.url
             if (self.url.endswith('/')):
                 self.url += 'index.html'
             elif (len(self.url.split('/')) == 1):
                 self.url += '/index.html'
+
             r = requests.head(self.url)
             if (r.status_code != 200):
                 raise IOError
+                
             self.length = int(r.headers.get('Content-Length'))
-            print self.length
-
             if (r.headers.get('Accept-Ranges') == 'bytes'):
                 self.start()
             elif (r.status_code == 200):
@@ -67,9 +67,8 @@ class DownloaderAccelerator:
                 self.start()
             else:
                 raise IOError
-        except:
-            print 'An error occurred: ',resp.status, resp.reason
-            
+        finally:
+            print r.status_code, r.reason
         exit(0)
 
     def start(self):
@@ -97,4 +96,4 @@ class DownloaderAccelerator:
         print "'%s' saved [%d/%d]" % (local_filename, os.path.getsize(local_filename), self.length)
 
 if __name__ == '__main__':
-    d = DownloaderAccelerator(1, 'localhost')
+    d = DownloaderAccelerator(5, 'cs360.byu.edu/static/lectures/fall-2015/semaphores.pdf')
